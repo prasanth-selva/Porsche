@@ -88,7 +88,8 @@ export default function ScrollSequence() {
     canvas.height = window.innerHeight;
 
     // Calculate scaling mechanism to guarantee aspect ratio "contain", with increased zoom
-    const ZOOM_FACTOR = 1.35;
+    // Dynamically adjust zoom for mobile screens to prevent cutting off the car
+    const ZOOM_FACTOR = window.innerWidth < 768 ? 1.0 : 1.35;
     const hRatio = canvas.width / image.width;
     const vRatio = canvas.height / image.height;
     const ratio = Math.min(hRatio, vRatio) * ZOOM_FACTOR;
@@ -132,7 +133,7 @@ export default function ScrollSequence() {
   }, [isLoaded, images]);
 
   return (
-    <div ref={containerRef} className="relative h-[1000vh] bg-black">
+    <div ref={containerRef} className="relative h-[800vh] md:h-[1000vh] bg-black">
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         
         {/* Loading Spinner */}
@@ -165,7 +166,7 @@ export default function ScrollSequence() {
 
              {/* 30% Scroll: Feature / Message #1 (Left aligned) */}
              <motion.div 
-               className="w-full absolute left-10 md:left-24 max-w-sm"
+               className="w-full absolute left-6 md:left-24 max-w-xs md:max-w-sm"
                style={{
                  opacity: useTransform(scrollYProgress, [0.2, 0.3, 0.4], [0, 1, 0]),
                  y: useTransform(scrollYProgress, [0.2, 0.4], [20, -20])
@@ -179,7 +180,7 @@ export default function ScrollSequence() {
 
              {/* 60% Scroll: Feature / Message #2 (Right aligned) */}
              <motion.div 
-               className="w-full absolute right-10 md:right-24 max-w-sm text-right flex flex-col items-end"
+               className="w-full absolute right-6 md:right-24 max-w-xs md:max-w-sm text-right flex flex-col items-end"
                style={{
                  opacity: useTransform(scrollYProgress, [0.5, 0.6, 0.7], [0, 1, 0]),
                  y: useTransform(scrollYProgress, [0.5, 0.7], [20, -20])
