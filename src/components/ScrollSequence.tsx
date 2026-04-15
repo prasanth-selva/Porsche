@@ -87,10 +87,11 @@ export default function ScrollSequence() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    // Calculate scaling mechanism to guarantee aspect ratio "contain"
+    // Calculate scaling mechanism to guarantee aspect ratio "contain", with increased zoom
+    const ZOOM_FACTOR = 1.35;
     const hRatio = canvas.width / image.width;
     const vRatio = canvas.height / image.height;
-    const ratio = Math.min(hRatio, vRatio);
+    const ratio = Math.min(hRatio, vRatio) * ZOOM_FACTOR;
 
     const centerShift_x = (canvas.width - image.width * ratio) / 2;
     const centerShift_y = (canvas.height - image.height * ratio) / 2;
@@ -131,14 +132,14 @@ export default function ScrollSequence() {
   }, [isLoaded, images]);
 
   return (
-    <div ref={containerRef} className="relative h-[400vh] bg-black">
+    <div ref={containerRef} className="relative h-[1000vh] bg-black">
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         
         {/* Loading Spinner */}
         {!isLoaded && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-50 text-white">
             <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4" />
-            <p className="text-white/60 tracking-widest text-sm uppercase">Loading Engine {loadingProgress}%</p>
+            <p className="text-white/60 tracking-widest text-sm uppercase">Engine Starting... {loadingProgress}%</p>
           </div>
         )}
 
