@@ -35,9 +35,9 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="fixed top-0 left-0 w-full z-[100] px-8 py-6 flex justify-between items-center mix-blend-difference pointer-events-none">
+    <nav className="fixed top-0 left-0 w-full z-[100] px-4 md:px-8 py-4 md:py-6 flex justify-between items-center mix-blend-difference pointer-events-none">
        {/* Brand Logo / Name */}
-       <div className="text-white text-xl font-bold tracking-[0.3em] pointer-events-auto cursor-pointer">
+       <div className="text-white text-lg md:text-xl font-bold tracking-[0.3em] pointer-events-auto cursor-pointer">
          PORSCHE
        </div>
 

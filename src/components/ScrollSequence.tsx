@@ -109,12 +109,11 @@ export default function ScrollSequence() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    // Calculate scaling mechanism to guarantee aspect ratio "contain", with increased zoom
-    // Dynamically adjust zoom for mobile screens to prevent cutting off the car
-    const ZOOM_FACTOR = window.innerWidth < 768 ? 1.0 : 1.35;
+    // Calculate scaling mechanism to guarantee aspect ratio "cover"
+    // This ensures the image fills the entire screen on both mobile and desktop without black bars
     const hRatio = canvas.width / image.width;
     const vRatio = canvas.height / image.height;
-    const ratio = Math.min(hRatio, vRatio) * ZOOM_FACTOR;
+    const ratio = Math.max(hRatio, vRatio);
 
     const centerShift_x = (canvas.width - image.width * ratio) / 2;
     const centerShift_y = (canvas.height - image.height * ratio) / 2;
@@ -178,7 +177,7 @@ export default function ScrollSequence() {
              
              {/* 0% Scroll: Hero Headline (Centered) */}
              <motion.div 
-               className="w-full text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+               className="w-full text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4"
                style={{
                  opacity: useTransform(scrollYProgress, [0, 0.1, 0.15], [1, 1, 0])
                }}
@@ -188,7 +187,7 @@ export default function ScrollSequence() {
 
              {/* 30% Scroll: Feature / Message #1 (Left aligned) */}
              <motion.div 
-               className="w-full absolute left-6 md:left-24 max-w-xs md:max-w-sm"
+               className="w-full absolute left-4 md:left-24 max-w-xs md:max-w-sm px-4 md:px-0"
                style={{
                  opacity: useTransform(scrollYProgress, [0.2, 0.3, 0.4], [0, 1, 0]),
                  y: useTransform(scrollYProgress, [0.2, 0.4], [20, -20])
@@ -202,7 +201,7 @@ export default function ScrollSequence() {
 
              {/* 60% Scroll: Feature / Message #2 (Right aligned) */}
              <motion.div 
-               className="w-full absolute right-6 md:right-24 max-w-xs md:max-w-sm text-right flex flex-col items-end"
+               className="w-full absolute right-4 md:right-24 max-w-xs md:max-w-sm text-right flex flex-col items-end px-4 md:px-0"
                style={{
                  opacity: useTransform(scrollYProgress, [0.5, 0.6, 0.7], [0, 1, 0]),
                  y: useTransform(scrollYProgress, [0.5, 0.7], [20, -20])
@@ -216,7 +215,7 @@ export default function ScrollSequence() {
 
              {/* 90% Scroll: CTA / Final Message (Centered) */}
              <motion.div 
-               className="w-full text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+               className="w-full text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4"
                style={{
                  opacity: useTransform(scrollYProgress, [0.8, 0.9, 1], [0, 1, 1]),
                  y: useTransform(scrollYProgress, [0.8, 1], [20, 0])
