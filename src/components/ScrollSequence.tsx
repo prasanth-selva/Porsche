@@ -5,7 +5,7 @@ import { useScroll, useTransform, motion, useMotionValueEvent } from 'framer-mot
 
 const TOTAL_FRAMES = 300;
 const FRAME_PREFIX = '/hero/ezgif-frame-';
-const FRAME_SUFFIX = '.png';
+const FRAME_SUFFIX = '.webp';
 
 export default function ScrollSequence() {
   const containerRef = useRef<HTMLDivElement>(null);
