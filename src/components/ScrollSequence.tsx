@@ -24,33 +24,45 @@ export default function ScrollSequence() {
   const currentIndex = useTransform(scrollYProgress, [0, 1], [0, TOTAL_FRAMES - 1]);
 
   useEffect(() => {
-    // Preload all images
     let loadedCount = 0;
-    const loadedImages: HTMLImageElement[] = [];
+    const loadedImagesArray: HTMLImageElement[] = new Array(TOTAL_FRAMES);
 
-    const loadImages = async () => {
+    const loadImages = () => {
+      const promises = [];
+      
       for (let i = 1; i <= TOTAL_FRAMES; i++) {
-        const img = new Image();
-        const paddedIndex = String(i).padStart(3, '0');
-        img.src = `${FRAME_PREFIX}${paddedIndex}${FRAME_SUFFIX}`;
-        
-        await new Promise((resolve) => {
-          img.onload = () => {
+        promises.push(new Promise((resolve) => {
+          const img = new Image();
+          const paddedIndex = String(i).padStart(3, '0');
+          img.src = `${FRAME_PREFIX}${paddedIndex}${FRAME_SUFFIX}`;
+          
+          const handleLoad = () => {
             loadedCount++;
             setLoadingProgress(Math.round((loadedCount / TOTAL_FRAMES) * 100));
-            loadedImages.push(img);
+            loadedImagesArray[i - 1] = img;
+            
+            // Show the UI immediately once the first frame is ready
+            if (i === 1) {
+              setImages([...loadedImagesArray]);
+              setIsLoaded(true);
+            }
+            
+            // Batch update state to prevent too many renders
+            if (loadedCount % 20 === 0 || loadedCount === TOTAL_FRAMES) {
+              setImages([...loadedImagesArray]);
+            }
             resolve(null);
           };
-          img.onerror = () => {
-             // To prevent infinite hang on error, we resolve anyway
-             loadedCount++;
-             loadedImages.push(img);
-             resolve(null);
-          }
-        });
+
+          img.onload = handleLoad;
+          img.onerror = handleLoad;
+        }));
       }
-      setImages(loadedImages);
-      setIsLoaded(true);
+
+      Promise.all(promises).then(() => {
+        setImages([...loadedImagesArray]);
+        setIsLoaded(true);
+      });
     };
 
     loadImages();
