@@ -28,41 +28,51 @@ export default function ScrollSequence() {
     const loadedImagesArray: HTMLImageElement[] = new Array(TOTAL_FRAMES);
 
     const loadImages = () => {
-      const promises = [];
+      // Load the very first frame exclusively to prioritize it
+      const firstImage = new Image();
+      firstImage.src = `${FRAME_PREFIX}001${FRAME_SUFFIX}`;
       
-      for (let i = 1; i <= TOTAL_FRAMES; i++) {
-        promises.push(new Promise((resolve) => {
-          const img = new Image();
-          const paddedIndex = String(i).padStart(3, '0');
-          img.src = `${FRAME_PREFIX}${paddedIndex}${FRAME_SUFFIX}`;
-          
-          const handleLoad = () => {
-            loadedCount++;
-            setLoadingProgress(Math.round((loadedCount / TOTAL_FRAMES) * 100));
-            loadedImagesArray[i - 1] = img;
-            
-            // Show the UI immediately once the first frame is ready
-            if (i === 1) {
-              setImages([...loadedImagesArray]);
-              setIsLoaded(true);
-            }
-            
-            // Batch update state to prevent too many renders
-            if (loadedCount % 20 === 0 || loadedCount === TOTAL_FRAMES) {
-              setImages([...loadedImagesArray]);
-            }
-            resolve(null);
-          };
-
-          img.onload = handleLoad;
-          img.onerror = handleLoad;
-        }));
-      }
-
-      Promise.all(promises).then(() => {
+      const onFirstImageLoad = () => {
+        loadedCount++;
+        setLoadingProgress(Math.round((loadedCount / TOTAL_FRAMES) * 100));
+        loadedImagesArray[0] = firstImage;
+        
+        // BAM! The UI is ready instantly.
         setImages([...loadedImagesArray]);
         setIsLoaded(true);
-      });
+
+        // Now load the rest of the frames (2 to 300) in the background
+        const promises = [];
+        for (let i = 2; i <= TOTAL_FRAMES; i++) {
+          promises.push(new Promise((resolve) => {
+            const img = new Image();
+            const paddedIndex = String(i).padStart(3, '0');
+            img.src = `${FRAME_PREFIX}${paddedIndex}${FRAME_SUFFIX}`;
+            
+            const handleLoad = () => {
+              loadedCount++;
+              setLoadingProgress(Math.round((loadedCount / TOTAL_FRAMES) * 100));
+              loadedImagesArray[i - 1] = img;
+              
+              // Batch state updates so we don't choke the render thread
+              if (loadedCount % 30 === 0 || loadedCount === TOTAL_FRAMES) {
+                setImages([...loadedImagesArray]);
+              }
+              resolve(null);
+            };
+
+            img.onload = handleLoad;
+            img.onerror = handleLoad;
+          }));
+        }
+
+        Promise.all(promises).then(() => {
+           setImages([...loadedImagesArray]);
+        });
+      };
+
+      firstImage.onload = onFirstImageLoad;
+      firstImage.onerror = onFirstImageLoad;
     };
 
     loadImages();
