@@ -1,125 +1,185 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useScroll, useTransform, motion, useMotionValueEvent } from 'framer-motion';
+import Lenis from 'lenis';
 
 const TOTAL_FRAMES = 300;
-const INITIAL_FRAMES = 12;
 const FRAME_CONCURRENCY = 6;
-const SCROLL_GATE_TIMEOUT_MS = 10_000;
 const FRAME_PREFIX = '/hero/ezgif-frame-';
 const FRAME_SUFFIX = '.webp';
+type LoadState = 'loading' | 'error' | 'ready';
 
 export default function ScrollSequence() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const frameImagesRef = useRef<(HTMLImageElement | null)[]>(Array.from({ length: TOTAL_FRAMES }, () => null));
+  const frameRequestsRef = useRef(new Map<number, Promise<HTMLImageElement>>());
+  const failedFramesRef = useRef<number[]>([]);
   const [images, setImages] = useState<HTMLImageElement[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [scrollUnlocked, setScrollUnlocked] = useState(false);
-  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadedFrameCount, setLoadedFrameCount] = useState(0);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const isLoaded = loadState === 'ready';
+  const loadingProgress = Math.floor((loadedFrameCount / TOTAL_FRAMES) * 100);
 
-  // Framer Motion scroll hook tied to the component's div
+  // Framer Motion tracks the page's native scroll position; Lenis is initialized only after every frame is ready.
   const { scrollYProgress } = useScroll({
     target: containerRef,
     offset: ['start start', 'end end'],
   });
 
-  // Map scroll progress to a frame index
   const currentIndex = useTransform(scrollYProgress, [0, 1], [0, TOTAL_FRAMES - 1]);
 
-  // Keep the page still until the opening frames have settled. Always release
-  // the lock on readiness, failure, timeout, or unmount.
-  useEffect(() => {
-    if (scrollUnlocked) return;
+  // Block every user scroll input while loading or retrying, and restore the exact previous styles on release.
+  useLayoutEffect(() => {
+    if (isLoaded) return;
 
     const root = document.documentElement;
     const body = document.body;
+    const lockedScrollY = window.scrollY;
     const previousRootOverflow = root.style.overflow;
     const previousBodyOverflow = body.style.overflow;
+    const previousRootOverscroll = root.style.overscrollBehavior;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+    const previousRootTouchAction = root.style.touchAction;
+    const previousBodyTouchAction = body.style.touchAction;
+
     root.style.overflow = 'hidden';
     body.style.overflow = 'hidden';
+    root.style.overscrollBehavior = 'none';
+    body.style.overscrollBehavior = 'none';
+    root.style.touchAction = 'none';
+    body.style.touchAction = 'none';
 
-    const timeout = window.setTimeout(() => {
-      setLoadingTimedOut(true);
-      setScrollUnlocked(true);
-    }, SCROLL_GATE_TIMEOUT_MS);
+    const preventScrollInput = (event: Event) => event.preventDefault();
+    const preventScrollKeys = (event: KeyboardEvent) => {
+      if ([' ', 'PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+      }
+    };
+    const keepScrollPosition = () => {
+      if (window.scrollY !== lockedScrollY) window.scrollTo(0, lockedScrollY);
+    };
+
+    document.addEventListener('wheel', preventScrollInput, { capture: true, passive: false });
+    document.addEventListener('touchmove', preventScrollInput, { capture: true, passive: false });
+    document.addEventListener('keydown', preventScrollKeys, true);
+    window.addEventListener('scroll', keepScrollPosition, { passive: true });
 
     return () => {
-      window.clearTimeout(timeout);
+      document.removeEventListener('wheel', preventScrollInput, true);
+      document.removeEventListener('touchmove', preventScrollInput, true);
+      document.removeEventListener('keydown', preventScrollKeys, true);
+      window.removeEventListener('scroll', keepScrollPosition);
       root.style.overflow = previousRootOverflow;
       body.style.overflow = previousBodyOverflow;
+      root.style.overscrollBehavior = previousRootOverscroll;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+      root.style.touchAction = previousRootTouchAction;
+      body.style.touchAction = previousBodyTouchAction;
     };
-  }, [scrollUnlocked]);
+  }, [isLoaded]);
 
-  // Load a small opening window first, then stream the remaining frames with
-  // bounded concurrency instead of creating 300 simultaneous requests.
+  // Load every frame with a six-request ceiling. Successful frames are retained across retries;
+  // failed URLs are retried only after the current queue settles, so requests are never duplicated.
   useEffect(() => {
     let cancelled = false;
-    let settledCount = 0;
-    let initialSettledCount = 0;
-    let successfulInitialCount = 0;
-    const loadedImagesArray: HTMLImageElement[] = new Array(TOTAL_FRAMES);
+    const framesToLoad = failedFramesRef.current.length > 0
+      ? [...failedFramesRef.current]
+      : Array.from({ length: TOTAL_FRAMES }, (_, index) => index + 1)
+          .filter((frameNumber) => !frameImagesRef.current[frameNumber - 1]);
+    const failedThisAttempt: number[] = [];
+    let nextFrameIndex = 0;
 
-    const loadFrame = (frameNumber: number) => new Promise<void>((resolve) => {
+    failedFramesRef.current = [];
+    setLoadState('loading');
+
+    const loadFrame = (frameNumber: number): Promise<HTMLImageElement> => {
+      const loadedImage = frameImagesRef.current[frameNumber - 1];
+      if (loadedImage) return Promise.resolve(loadedImage);
+
+      const existingRequest = frameRequestsRef.current.get(frameNumber);
+      if (existingRequest) return existingRequest;
+
       const image = new Image();
       image.decoding = 'async';
-      image.onload = () => {
-        if (!cancelled) {
-          loadedImagesArray[frameNumber - 1] = image;
-          settledCount += 1;
-          if (frameNumber <= INITIAL_FRAMES) successfulInitialCount += 1;
-          setLoadingProgress(Math.round((settledCount / TOTAL_FRAMES) * 100));
+      const request = new Promise<HTMLImageElement>((resolve, reject) => {
+        image.onload = () => {
+          void image.decode().then(() => {
+            frameImagesRef.current[frameNumber - 1] = image;
+            resolve(image);
+          }).catch(reject);
+        };
+        image.onerror = () => reject(new Error(`Failed to load frame ${frameNumber}`));
+        image.src = `${FRAME_PREFIX}${String(frameNumber).padStart(3, '0')}${FRAME_SUFFIX}`;
+      }).finally(() => {
+        frameRequestsRef.current.delete(frameNumber);
+      });
 
-          if (frameNumber <= INITIAL_FRAMES) {
-            setIsLoaded(true);
-            setImages([...loadedImagesArray]);
-          }
-          if (settledCount % 12 === 0 || settledCount === TOTAL_FRAMES) {
-            setImages([...loadedImagesArray]);
-          }
-        }
-        resolve();
-      };
-      image.onerror = () => {
-        if (!cancelled) {
-          settledCount += 1;
-          setLoadingProgress(Math.round((settledCount / TOTAL_FRAMES) * 100));
-        }
-        resolve();
-      };
-      image.src = `${FRAME_PREFIX}${String(frameNumber).padStart(3, '0')}${FRAME_SUFFIX}`;
-    });
-
-    const runQueue = async (firstFrame: number, lastFrame: number) => {
-      let nextFrame = firstFrame;
-      const worker = async () => {
-        while (!cancelled) {
-          const frameNumber = nextFrame++;
-          if (frameNumber > lastFrame) return;
-          await loadFrame(frameNumber);
-          if (frameNumber <= INITIAL_FRAMES) {
-            initialSettledCount += 1;
-            if (initialSettledCount === INITIAL_FRAMES && !cancelled) {
-              setImages([...loadedImagesArray]);
-              if (successfulInitialCount === 0) setLoadFailed(true);
-              setScrollUnlocked(true);
-            }
-          }
-        }
-      };
-      await Promise.all(Array.from(
-        { length: Math.min(FRAME_CONCURRENCY, lastFrame - firstFrame + 1) },
-        () => worker()
-      ));
+      frameRequestsRef.current.set(frameNumber, request);
+      return request;
     };
 
-    void runQueue(1, TOTAL_FRAMES);
+    const worker = async () => {
+      while (!cancelled) {
+        const frameNumber = framesToLoad[nextFrameIndex++];
+        if (frameNumber === undefined) return;
+        const succeeded = await loadFrame(frameNumber).then(() => true, () => false);
+        if (cancelled) return;
+        if (succeeded) {
+          setLoadedFrameCount(frameImagesRef.current.filter(Boolean).length);
+        } else {
+          failedThisAttempt.push(frameNumber);
+        }
+      }
+    };
+
+    const runQueue = async () => {
+      await Promise.all(
+        Array.from({ length: Math.min(FRAME_CONCURRENCY, framesToLoad.length) }, () => worker())
+      );
+      if (cancelled) return;
+      if (failedThisAttempt.length > 0) {
+        failedFramesRef.current = failedThisAttempt;
+        setLoadState('error');
+        return;
+      }
+
+      setImages(frameImagesRef.current as HTMLImageElement[]);
+      setLoadedFrameCount(TOTAL_FRAMES);
+      setLoadState('ready');
+    };
+
+    void runQueue();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryAttempt]);
+
+  // Lenis shares a requestAnimationFrame loop with the scroll sequence and is fully torn down on unmount.
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    const lenis = new Lenis({
+      autoRaf: false,
+      lerp: 0.1,
+      smoothWheel: true,
+      syncTouch: false,
+      respectReducedMotion: true,
+    });
+    let animationFrameId = 0;
+    const raf = (time: number) => {
+      lenis.raf(time);
+      animationFrameId = window.requestAnimationFrame(raf);
+    };
+
+    animationFrameId = window.requestAnimationFrame(raf);
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      lenis.destroy();
+    };
+  }, [isLoaded]);
 
   // Use motion value event to trigger the canvas render draw on scroll update
   useMotionValueEvent(currentIndex, "change", (latestRef) => {
@@ -133,14 +193,14 @@ export default function ScrollSequence() {
       }
   });
 
-  // Also initial draw when loaded
+  // Draw the frame corresponding to the current scroll position as soon as the full sequence is ready.
   useEffect(() => {
-    const firstAvailableImage = images.find(Boolean);
-    if (isLoaded && firstAvailableImage) {
-      drawToCanvas(firstAvailableImage);
-    }
+    if (!isLoaded || images.length !== TOTAL_FRAMES) return;
+    const index = Math.min(Math.max(Math.floor(currentIndex.get()), 0), TOTAL_FRAMES - 1);
+    const image = images[index];
+    if (image) drawToCanvas(image);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded]);
+  }, [isLoaded, images]);
 
   const drawToCanvas = (image: HTMLImageElement) => {
     const canvas = canvasRef.current;
@@ -198,46 +258,55 @@ export default function ScrollSequence() {
   }, [isLoaded, images]);
 
   return (
-    <div ref={containerRef} className="relative h-[800vh] md:h-[1000vh] bg-black">
+    <div ref={containerRef} aria-busy={!isLoaded} className="relative h-[800vh] md:h-[1000vh] bg-black">
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         
-        {!scrollUnlocked && !loadingTimedOut && !loadFailed && (
+        {!isLoaded && loadState === 'loading' && (
           <div
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black text-white"
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black px-6 text-white"
             role="status"
             aria-live="polite"
+            aria-atomic="true"
           >
-            <div className="mb-4 h-16 w-16 animate-spin rounded-full border-4 border-white/20 border-t-white" aria-hidden="true" />
-            <p className="text-sm uppercase tracking-widest text-white/60">Preparing the drive… {loadingProgress}%</p>
-            <progress className="sr-only" max={100} value={loadingProgress} aria-label="Loading Porsche frame sequence" />
+            <div className="mb-6 h-16 w-16 animate-spin motion-reduce:animate-none rounded-full border-4 border-white/20 border-t-white" aria-hidden="true" />
+            <p className="text-sm uppercase tracking-widest text-white/80">Preparing the drive</p>
+            <p className="mt-2 text-sm text-white/60" aria-hidden="true">
+              {loadedFrameCount} of {TOTAL_FRAMES} frames loaded · {loadingProgress}%
+            </p>
+            <progress
+              className="sr-only"
+              max={TOTAL_FRAMES}
+              value={loadedFrameCount}
+              aria-label="Loading Porsche frame sequence"
+              aria-valuetext={`${loadedFrameCount} of ${TOTAL_FRAMES} frames loaded (${loadingProgress}%)`}
+            />
           </div>
         )}
-        {!isLoaded && (loadingTimedOut || loadFailed) && (
+        {!isLoaded && loadState === 'error' && (
           <div
-            className="absolute inset-x-4 top-6 z-50 mx-auto flex max-w-lg items-center justify-between gap-4 rounded-sm border border-white/20 bg-black/90 px-4 py-3 text-sm text-white"
-            role="status"
-            aria-live="polite"
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black px-6 text-center text-white"
+            role="alert"
+            aria-live="assertive"
           >
-            <span>
-              {loadFailed
-                ? 'The Porsche animation could not load. Scrolling is available.'
-                : 'Frame loading is taking longer than expected. Scrolling is available.'}
-            </span>
+            <h2 className="text-lg font-medium">The Porsche animation could not be fully loaded</h2>
+            <p className="mt-3 max-w-md text-sm text-white/70">
+              {failedFramesRef.current.length} {failedFramesRef.current.length === 1 ? 'frame failed' : 'frames failed'} to load.
+              The experience remains locked until all {TOTAL_FRAMES} frames are ready.
+            </p>
+            <p className="mt-2 text-sm text-white/60">{loadedFrameCount} of {TOTAL_FRAMES} frames loaded · {loadingProgress}%</p>
             <button
               type="button"
-              className="shrink-0 underline underline-offset-4"
-              onClick={() => {
-                setLoadingTimedOut(false);
-                setLoadFailed(false);
-              }}
+              className="mt-6 rounded-sm border border-white/50 px-6 py-3 text-sm uppercase tracking-widest transition-colors hover:bg-white hover:text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+              onClick={() => setRetryAttempt((attempt) => attempt + 1)}
             >
-              Dismiss
+              Retry loading frames
             </button>
           </div>
         )}
 
         <canvas
           ref={canvasRef}
+          aria-hidden="true"
           className={`w-full h-full object-cover transition-opacity duration-1000 ${
             isLoaded ? 'opacity-100' : 'opacity-0'
           }`}
